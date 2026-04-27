@@ -465,10 +465,32 @@ function carregarDash(){
 }
 
 // LANÇAMENTOS
-function carregarLanc(){
+function carregarLanc(scrollToOrdem){
   document.getElementById('tbl-lanc').innerHTML='<div class="loader"><div class="spin"></div></div>';
   // Grade needs all months — fetch all lancamentos
-  return api({action:'getLancamentos'}).then(l=>{_lanc=l;renderGrade();}).catch(()=>{document.getElementById('tbl-lanc').innerHTML='<div class="empty">Erro ao carregar</div>';});
+  return api({action:'getLancamentos'}).then(l=>{
+    _lanc=l;
+    renderGrade();
+    // Scroll to specific item if requested
+    if(scrollToOrdem){
+      setTimeout(()=>scrollToItem(scrollToOrdem), 100);
+    }
+  }).catch(()=>{document.getElementById('tbl-lanc').innerHTML='<div class="empty">Erro ao carregar</div>';});
+}
+
+function scrollToItem(ordem){
+  // Find the row with this _ordem index
+  const rows = document.querySelectorAll('#tbl-lanc tr');
+  for(const row of rows){
+    const idxCell = row.querySelector('td:first-child');
+    if(idxCell && idxCell.textContent.trim() === String(ordem)){
+      row.scrollIntoView({behavior:'smooth', block:'center'});
+      // Highlight briefly
+      row.style.outline = '2px solid #378ADD';
+      setTimeout(()=>row.style.outline='', 1500);
+      break;
+    }
+  }
 }
 function toggleFiltroStatus(val) {
   if (val === '') {
@@ -711,7 +733,18 @@ function renderGrade() {
   html += `<tr><td colspan="5" style="padding:6px 8px;border:0.5px solid var(--border);background:#2c2c2a;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#fff">Saldo do mês</td>${saldoCells}<td style="border:0.5px solid var(--border);background:#2c2c2a"></td></tr>`;
 
   html += '</tbody></table>';
+  // Save scroll position before update
+  const container = document.getElementById('tbl-lanc').parentElement;
+  const scrollTop = container ? container.scrollTop : 0;
+  const scrollLeft = container ? container.scrollLeft : 0;
+
   document.getElementById('tbl-lanc').innerHTML = html;
+
+  // Restore scroll position after render
+  if (container) {
+    container.scrollTop = scrollTop;
+    container.scrollLeft = scrollLeft;
+  }
 }
 
 
@@ -793,7 +826,8 @@ function salvarLanc(){
       delete document.getElementById('mod-lanc').dataset.editId;
       document.querySelector('#mod-lanc .modal-title').textContent='Novo lançamento';
       toast('Lançamento atualizado!');
-      return carregarLanc();
+      const editOrdem = _lanc.find(l=>l.id===editId)?._ordem;
+      return carregarLanc(editOrdem);
     }).then(()=>{
       carregarDash();
     }).catch(err=>{
