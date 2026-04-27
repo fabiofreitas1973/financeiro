@@ -730,7 +730,18 @@ function delGradeLanc(desc, cartao) {
 
 
 function setSt(id,status){
-  apiPost({action:'setStatus',id,status}).then(()=>{const l=_lanc.find(x=>x.id===id);if(l)l.status=status;renderGrade();carregarDash();}).catch(err=>toast('Erro: '+err.message,true));
+  // Optimistic update — change locally and re-render only the affected row area
+  const l=_lanc.find(x=>x.id===id);
+  const _prevStatus = l ? l.status : null;
+  if(l){ l.status=status; renderGrade(); }
+  apiPost({action:'setStatus',id,status}).then(()=>{
+    // Debounce dashboard refresh
+    clearTimeout(window._dashTimer);
+    window._dashTimer = setTimeout(()=>carregarDash(), 1500);
+  }).catch(err=>{
+    if(l){ l.status = _prevStatus; renderGrade(); }
+    toast('Erro: '+err.message,true);
+  });
 }
 function abrirModalLanc(cartao){
   ['l-desc','l-valor','l-obs'].forEach(i=>document.getElementById(i).value='');
