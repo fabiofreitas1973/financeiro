@@ -958,8 +958,12 @@ function carregarProj(){
   document.getElementById('tbl-proj').innerHTML='<div class="loader"><div class="spin"></div></div>';
   const meses = parseInt(document.getElementById('proj-meses')?.value || 12);
   
+  // Ensure lancamentos are loaded first
+  const loadLanc = (_lanc && _lanc.length > 0) ? Promise.resolve() : carregarLanc();
+  
   // Get config for initial reserve balance
-  api({action:'getConfig'}).then(cfg => {
+  loadLanc.then(() => api({action:'getConfig'})).then(cfg => {
+    if (!cfg) return;
     const saldoInicialReserva = parseFloat(cfg.saldo_reserva_inicial) || 0;
     
     // Build months list starting from mesAtual
@@ -1018,8 +1022,8 @@ function carregarProj(){
     });
     
     renderProjecao(_projDados);
-  }).catch(()=>{
-    document.getElementById('tbl-proj').innerHTML='<div class="empty">Erro ao carregar</div>';
+  }).catch(err=>{
+    document.getElementById('tbl-proj').innerHTML=`<div class="empty">Erro ao carregar: ${err?.message||'verifique a conexão'}</div>`;
   });
 }
 
