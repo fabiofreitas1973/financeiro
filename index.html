@@ -232,27 +232,21 @@ tr.raberto:hover td{background:rgba(224,123,0,.18)}
     </div>
 
     <div class="page" id="page-projecao">
-      <div style="font-size:17px;font-weight:600;margin-bottom:16px">Projeção financeira</div>
-      <div class="actions">
-        <label style="font-size:13px;color:var(--text2)">Meses à frente:</label>
-        <select id="proj-meses" onchange="carregarProj()" style="padding:6px 9px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);font-size:13px">
-          <option value="6">6 meses</option><option value="12" selected>12 meses</option><option value="18">18 meses</option><option value="24">24 meses</option>
+      <div style="font-size:17px;font-weight:600;margin-bottom:12px">Projeção financeira</div>
+      <div class="actions" style="margin-bottom:12px">
+        <select id="proj-meses" style="padding:5px 8px;border:0.5px solid var(--border2);border-radius:var(--radius-sm);font-size:12px" onchange="carregarProjecao()">
+          <option value="6">6 meses</option>
+          <option value="12" selected>12 meses</option>
+          <option value="18">18 meses</option>
+          <option value="24">24 meses</option>
         </select>
-        <button class="btn" onclick="carregarProj()">↻ Atualizar</button>
+        <button class="btn" onclick="carregarProjecao()">↻ Atualizar</button>
+        <span style="font-size:12px;color:var(--text3);margin-left:8px">Clique em qualquer valor para editar</span>
       </div>
-      <div class="card" style="margin-bottom:14px">
-        <div class="card-header"><span class="card-title">Saldo da reserva mês a mês</span><span style="font-size:11px;color:var(--text3)">🟩 saudável &nbsp;🟧 baixo &nbsp;🟥 negativo</span></div>
-        <div id="proj-chart" style="padding:16px;overflow-x:auto"></div>
+      <div style="overflow-x:auto;border:0.5px solid var(--border);border-radius:var(--radius)">
+        <div id="tbl-proj"><div class="loader"><div class="spin"></div></div></div>
       </div>
-      <div class="card"><div class="card-body" style="padding:0">
-        <div class="proj-grid proj-header">
-          <div class="proj-cell">Mês</div><div class="proj-cell">Receitas</div><div class="proj-cell">Despesas</div>
-          <div class="proj-cell">Invest.</div><div class="proj-cell">Saldo mês</div><div class="proj-cell">Reserva</div>
-        </div>
-        <div id="proj-rows"></div>
-      </div></div>
     </div>
-
     <div class="page" id="page-fixos">
       <div style="font-size:17px;font-weight:600;margin-bottom:16px">Fixos recorrentes</div>
       <div class="actions"><button class="btn btn-primary" onclick="abrirModalFixo()">+ Novo item fixo</button><button class="btn" onclick="carregarFixos()">↻ Atualizar</button></div>
@@ -419,6 +413,8 @@ function navTo(p){
   document.getElementById('page-'+p).classList.add('active');
   paginaAtual=p;
   ({dashboard:carregarDash,lancamentos:carregarLanc,faturas:carregarFaturas,projecao:carregarProj,fixos:carregarFixos,reserva:carregarRes,config:carregarCfgPg})[p]?.();
+  // Reset proj overrides on page change
+  if(p!=='projecao') _projOverrides={};
 }
 
 function onMesChange(){mesAtual=document.getElementById('mes-ref').value;document.getElementById('mes-mob').value=mesAtual;document.getElementById('l-mes').value=mesAtual;document.getElementById('res-mes').value=mesAtual;_gradeOffset=0;navTo(paginaAtual);}
@@ -922,22 +918,158 @@ function pagarFat(cartao){
 function moverProx(id){if(!confirm('Mover para a próxima fatura (mês seguinte)?'))return;apiPost({action:'moverProximoMes',id}).then(()=>{toast('Movido para o próximo mês.');carregarFaturas();}).catch(err=>toast('Erro: '+err.message,true));}
 
 // PROJEÇÃO
+function carregarProjecao() { carregarProj(); }
+
+// Receitas que vêm da Reserva
+const RECEITAS_RESERVA = ['13o salário Fábio/Ana', 'Férias Fábio/Ana', 'Variável Fábio', 'Variável Ana', 'Restituição IR Fábio/Ana'];
+
+// Projeção editável — armazena overrides do usuário
+let _projOverrides = {};
+
+function salvarOverride(mes, campo, valor) {
+  if (!_projOverrides[mes]) _projOverrides[mes] = {};
+  _projOverrides[mes][campo] = parseFloat(valor) || 0;
+  renderProjecao(_projDados);
+}
+
+function editarCelula(el, mes, campo, valorAtual) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  input.value = valorAtual;
+  input.step = '0.01';
+  input.style.cssText = 'width:90px;padding:2px 4px;font-size:12px;border:1px solid #378ADD;border-radius:3px;text-align:right';
+  el.innerHTML = '';
+  el.appendChild(input);
+  input.focus();
+  input.select();
+  const salvar = () => {
+    salvarOverride(mes, campo, input.value);
+  };
+  input.addEventListener('blur', salvar);
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { input.blur(); }
+    if (e.key === 'Escape') { renderProjecao(_projDados); }
+  });
+}
+
+let _projDados = [];
+
 function carregarProj(){
-  document.getElementById('proj-rows').innerHTML='<div class="loader"><div class="spin"></div></div>';
-  document.getElementById('proj-chart').innerHTML='';
-  api({action:'getProjecao',mes_inicio:mesAtual,meses:document.getElementById('proj-meses').value}).then(dados=>{
-    const maxR=Math.max(...dados.map(d=>Math.abs(d.saldo_reserva)),1);
-    document.getElementById('proj-chart').innerHTML='<div style="display:flex;align-items:flex-end;overflow-x:auto;padding-bottom:4px">'+
-      dados.map(d=>{const pct=Math.min(Math.abs(d.saldo_reserva)/maxR*100,100);const cor=d.saldo_reserva<0?'var(--red)':d.saldo_reserva<maxR*.2?'var(--amber)':'var(--green)';const fk=v=>Math.abs(v)>=1000?Math.round(v/1000)+'k':Math.round(v);
-        return `<div style="display:inline-flex;flex-direction:column;align-items:center;margin-right:6px;min-width:40px"><div style="font-size:9px;color:var(--text3);margin-bottom:3px">${fk(d.saldo_reserva)}</div><div style="height:80px;display:flex;align-items:flex-end"><div style="width:28px;background:${cor};border-radius:3px 3px 0 0;height:${Math.max(pct,2)}%"></div></div><div style="font-size:9px;color:var(--text3);margin-top:3px;white-space:nowrap">${fmtM(d.mes_ref)}</div></div>`;
-      }).join('')+'</div>';
-    document.getElementById('proj-rows').innerHTML=dados.map(d=>{
-      const sc=d.saldo<0?'color:var(--red)':'color:var(--green)';
-      const rc=d.saldo_reserva<0?'color:var(--red);font-weight:700':d.saldo_reserva<maxR*.2?'color:var(--amber);font-weight:600':'';
-      const cls=d.saldo_reserva<0?'rzero':d.saldo_reserva<maxR*.2?'rbaixa':'';
-      return `<div class="proj-grid proj-row ${cls}"><div class="proj-cell">${fmtM(d.mes_ref)}</div><div class="proj-cell" style="color:var(--green)">${fmt(d.receitas)}</div><div class="proj-cell" style="color:var(--red)">${fmt(d.despesas)}</div><div class="proj-cell">${fmt(d.investimentos)}</div><div class="proj-cell" style="${sc}">${fmt(d.saldo)}</div><div class="proj-cell" style="${rc}">${fmt(d.saldo_reserva)}</div></div>`;
-    }).join('');
-  }).catch(()=>{document.getElementById('proj-rows').innerHTML='<div class="empty">Erro ao carregar projeção</div>';});
+  document.getElementById('tbl-proj').innerHTML='<div class="loader"><div class="spin"></div></div>';
+  const meses = parseInt(document.getElementById('proj-meses')?.value || 12);
+  
+  // Get config for initial reserve balance
+  api({action:'getConfig'}).then(cfg => {
+    const saldoInicialReserva = parseFloat(cfg.saldo_reserva_inicial) || 0;
+    
+    // Build months list starting from mesAtual
+    const [y0,m0] = mesAtual.split('-').map(Number);
+    const mesesList = [];
+    for(let i=0; i<meses; i++){
+      const d = new Date(y0, m0-1+i, 1);
+      mesesList.push(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'));
+    }
+    
+    // Calculate projeção from _lanc
+    let saldoReserva = saldoInicialReserva;
+    _projDados = mesesList.map((mes, idx) => {
+      if(!_lanc || _lanc.length === 0){ document.getElementById('tbl-proj').innerHTML='<div class="empty">Carregue os Lançamentos primeiro</div>'; return {mes,recFixas:0,recReserva:0,totalEntradas:0,despesas:0,invest:0,saldoMes:0,retirada:0,saldo_reserva_antes:saldoReservaAntes||0,saldo_reserva_depois:saldoReservaAntes||0}; }
+      const lancMes = _lanc.filter(l => {
+        const lm = typeof l.mes_ref === 'string' ? l.mes_ref.substring(0,7) : '';
+        return lm === mes;
+      });
+      
+      const recFixas = lancMes.filter(l => l.tipo==='receita' && !RECEITAS_RESERVA.includes(l.descricao))
+        .reduce((s,l) => s+(parseFloat(l.valor)||0), 0);
+      
+      const recReserva = lancMes.filter(l => l.tipo==='receita' && RECEITAS_RESERVA.includes(l.descricao))
+        .reduce((s,l) => s+(parseFloat(l.valor)||0), 0);
+      
+      const desp = lancMes.filter(l => ['despesa_fixa','despesa_variavel','despesa'].includes(l.tipo))
+        .reduce((s,l) => s+(parseFloat(l.valor)||0), 0);
+      
+      const inv = lancMes.filter(l => l.tipo==='investimento')
+        .reduce((s,l) => s+(parseFloat(l.valor)||0), 0);
+      
+      // Apply overrides
+      const ov = _projOverrides[mes] || {};
+      const recFixasF  = ov.rec_fixas   !== undefined ? ov.rec_fixas   : recFixas;
+      const recReservaF = ov.rec_reserva !== undefined ? ov.rec_reserva : recReserva;
+      const despF      = ov.despesas    !== undefined ? ov.despesas    : desp;
+      const invF       = ov.invest      !== undefined ? ov.invest      : inv;
+      
+      const totalEntradas = recFixasF + recReservaF;
+      const saldoMes = totalEntradas - despF - invF;
+      
+      // Retirada da reserva: se saldo negativo, precisa retirar
+      const retiradaCalc = saldoMes < 0 ? Math.abs(saldoMes) : 0;
+      const retirada = ov.retirada !== undefined ? ov.retirada : retiradaCalc;
+      
+      const saldoReservaAntes = idx === 0 ? saldoInicialReserva : _projDados[idx-1].saldo_reserva_depois;
+      const saldoOverride = ov.saldo_reserva !== undefined ? ov.saldo_reserva : null;
+      const saldoReservaDepois = saldoOverride !== null ? saldoOverride : (saldoReservaAntes - retirada);
+      
+      return {
+        mes, recFixas: recFixasF, recReserva: recReservaF,
+        totalEntradas, despesas: despF, invest: invF,
+        saldoMes, retirada, saldo_reserva_antes: saldoReservaAntes,
+        saldo_reserva_depois: saldoReservaDepois
+      };
+    });
+    
+    renderProjecao(_projDados);
+  }).catch(()=>{
+    document.getElementById('tbl-proj').innerHTML='<div class="empty">Erro ao carregar</div>';
+  });
+}
+
+function renderProjecao(dados) {
+  const thS = 'background:var(--surface2);font-size:10px;font-weight:600;color:var(--text3);text-transform:uppercase;letter-spacing:.05em;padding:6px 10px;border:0.5px solid var(--border);white-space:nowrap;text-align:right';
+  const thL = thS + ';text-align:left';
+  
+  let html = `<table style="border-collapse:collapse;width:100%;min-width:900px;font-size:12px">
+  <thead><tr>
+    <th style="${thL};width:70px">Mês</th>
+    <th style="${thS}">Rec. Fixas</th>
+    <th style="${thS}">Da Reserva</th>
+    <th style="${thS}">Total Entradas</th>
+    <th style="${thS}">Despesas</th>
+    <th style="${thS}">Invest.</th>
+    <th style="${thS}">Saldo Mês</th>
+    <th style="${thS}">Retirada Reserva</th>
+    <th style="${thS}">Reserva Antes</th>
+    <th style="${thS}">Reserva Depois</th>
+  </tr></thead><tbody>`;
+  
+  dados.forEach(d => {
+    const mes = d.mes;
+    const isAtual = mes === mesAtual;
+    const rowBg = isAtual ? 'background:rgba(55,138,221,.06)' : '';
+    const saldoColor = d.saldoMes >= 0 ? 'color:var(--green)' : 'color:var(--red)';
+    const reservaColor = d.saldo_reserva_depois < 0 ? 'color:var(--red);font-weight:700' : 
+                         d.saldo_reserva_depois < 2000 ? 'color:var(--amber);font-weight:600' : 'color:var(--green)';
+    const retiradaColor = d.retirada > 0 ? 'color:var(--red)' : 'color:var(--text3)';
+    const borderMes = isAtual ? 'border-left:2px solid #378ADD' : '';
+    
+    const tdS = `padding:6px 10px;border:0.5px solid var(--border);text-align:right;cursor:pointer`;
+    const tdL = `padding:6px 10px;border:0.5px solid var(--border);font-weight:500;${borderMes}`;
+    
+    html += `<tr style="${rowBg}">
+      <td style="${tdL}">${fmtM(mes)}${isAtual?' ◀':''}</td>
+      <td style="${tdS}" onclick="editarCelula(this,'${mes}','rec_fixas',${d.recFixas})" title="Clique para editar"><span style="color:var(--green)">${fmt(d.recFixas)}</span></td>
+      <td style="${tdS}" onclick="editarCelula(this,'${mes}','rec_reserva',${d.recReserva})" title="Clique para editar"><span style="color:var(--amber)">${fmt(d.recReserva)}</span></td>
+      <td style="${tdS}"><strong>${fmt(d.totalEntradas)}</strong></td>
+      <td style="${tdS}" onclick="editarCelula(this,'${mes}','despesas',${d.despesas})" title="Clique para editar"><span style="color:var(--red)">${fmt(d.despesas)}</span></td>
+      <td style="${tdS}" onclick="editarCelula(this,'${mes}','invest',${d.invest})" title="Clique para editar">${fmt(d.invest)}</td>
+      <td style="${tdS}"><strong style="${saldoColor}">${fmt(d.saldoMes)}</strong></td>
+      <td style="${tdS}" onclick="editarCelula(this,'${mes}','retirada',${d.retirada})" title="Clique para editar"><span style="${retiradaColor}">${d.retirada > 0 ? fmt(d.retirada) : '—'}</span></td>
+      <td style="${tdS}"><span style="color:var(--text2)">${fmt(d.saldo_reserva_antes)}</span></td>
+      <td style="${tdS}" onclick="editarCelula(this,'${mes}','saldo_reserva',${d.saldo_reserva_depois})" title="Clique para editar"><strong style="${reservaColor}">${fmt(d.saldo_reserva_depois)}</strong></td>
+    </tr>`;
+  });
+  
+  html += '</tbody></table>';
+  document.getElementById('tbl-proj').innerHTML = html;
 }
 
 // FIXOS
